@@ -1,0 +1,65 @@
+@import './variables.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    font-family: 'Pretendard', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* 100dvh: 모바일 브라우저 주소창 동적 높이 대응 */
+    height: 100%;
+  }
+
+  body {
+    height: 100%;
+    background-color: var(--color-surface);
+    color: var(--color-text-primary);
+    overflow-x: hidden;
+    /* iOS 스크롤 바운스 방지 */
+    overscroll-behavior: none;
+  }
+
+  #app {
+    height: 100%;
+  }
+
+  body.native-consent-open {
+    overflow: hidden;
+  }
+
+  button {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  img {
+    max-width: 100%;
+    display: block;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-lg font-medium text-sm
+           transition-colors duration-200
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn--primary {
+    @apply bg-primary px-4 py-2 text-white hover:bg-primary-700;
+  }
+
+  .card {
+    @apply bg-surface rounded-card shadow-card p-4;
+  }
+}
