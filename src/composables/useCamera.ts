@@ -1,6 +1,8 @@
 import { ref, readonly, onUnmounted } from 'vue'
 import type { CapturedImage, CameraFacingMode, TouchFocusPoint } from '@/types/camera.types'
+import { useCameraTrack } from '@/composables/useCameraTrack'
 import { requestUserMedia } from '@/utils/media.util'
+import { applyContinuousAutofocus, detectTrackCapabilities } from '@/utils/cameraFocus.util'
 
 const CAPTURE_MIME = 'image/jpeg'
 const CAPTURE_QUALITY = 0.92
@@ -12,9 +14,9 @@ export function useCamera() {
   const isReady = ref(false)
   const isTorchOn = ref(false)
   const isTorchSupported = ref(false)
-  const isFocusSupported = ref(false)
-  const focusRipple = ref<TouchFocusPoint | null>(null)
   const error = ref<string | null>(null)
+
+  const trackControls = useCameraTrack()
 
   async function startCamera(el: HTMLVideoElement, facing: CameraFacingMode = 'environment'): Promise<void> {
     error.value = null
@@ -25,7 +27,8 @@ export function useCamera() {
         facingMode: { ideal: facing },
         width: { ideal: 1920 },
         height: { ideal: 1080 },
-      },
+        focusMode: { ideal: 'continuous' },
+      } as MediaTrackConstraints,
       audio: false,
     }
 
@@ -36,52 +39,19 @@ export function useCamera() {
       el.srcObject = mediaStream
       await el.play()
       isReady.value = true
-      detectCapabilities(mediaStream)
+
+      const capabilities = detectTrackCapabilities(mediaStream)
+      isTorchSupported.value = capabilities.isTorchSupported
+      await applyContinuousAutofocus(mediaStream)
+      trackControls.bindStream(mediaStream)
     } catch (err) {
       error.value = err instanceof Error ? err.message : '카메라 접근에 실패했습니다.'
       isReady.value = false
     }
   }
 
-  function detectCapabilities(mediaStream: MediaStream): void {
-    const track = mediaStream.getVideoTracks()[0]
-    if (!track) return
-
-    const capabilities = track.getCapabilities?.() ?? {}
-    isTorchSupported.value = 'torch' in capabilities
-    // pointsOfInterest 또는 focusMode 지원 여부 확인
-    isFocusSupported.value = 'focusMode' in capabilities || 'pointsOfInterest' in capabilities
-  }
-
-  async function applyTouchFocus(point: TouchFocusPoint, videoEl: HTMLVideoElement): Promise<void> {
-    if (!stream.value || !isFocusSupported.value) return
-
-    const track = stream.value.getVideoTracks()[0]
-    if (!track) return
-
-    const rect = videoEl.getBoundingClientRect()
-    // 비디오 요소 기준 상대 좌표(0~1)로 변환
-    const relX = (point.x - rect.left) / rect.width
-    const relY = (point.y - rect.top) / rect.height
-
-    // 포커스 리플 UI 표시
-    focusRipple.value = { x: point.x, y: point.y }
-    setTimeout(() => {
-      focusRipple.value = null
-    }, 1000)
-
-    try {
-      await track.applyConstraints({
-        advanced: [
-          {
-            focusMode: 'manual',
-            pointsOfInterest: [{ x: relX, y: relY }],
-          } as MediaTrackConstraintSet,
-        ],
-      })
-    } catch {
-      // focusMode 미지원 기기에서 무시
-    }
+  async function applyTouchFocusHandler(point: TouchFocusPoint, videoEl: HTMLVideoElement): Promise<void> {
+    await trackControls.handleTouchFocus(point, videoEl)
   }
 
   function capturePhoto(): CapturedImage | null {
@@ -144,6 +114,7 @@ export function useCamera() {
     }
     isReady.value = false
     isTorchOn.value = false
+    trackControls.unbindStream()
   }
 
   onUnmounted(() => {
@@ -155,16 +126,29 @@ export function useCamera() {
     isReady: readonly(isReady),
     isTorchOn: readonly(isTorchOn),
     isTorchSupported: readonly(isTorchSupported),
-    isFocusSupported: readonly(isFocusSupported),
-    focusRipple: readonly(focusRipple),
+    focusRipple: trackControls.focusRipple,
+    zoomLevel: trackControls.zoomLevel,
+    zoomMin: trackControls.zoomMin,
+    zoomMax: trackControls.zoomMax,
+    isZoomSupported: trackControls.isZoomSupported,
     facingMode: readonly(facingMode),
     error: readonly(error),
     startCamera,
     stopCamera,
     capturePhoto,
-    applyTouchFocus,
+    applyTouchFocus: applyTouchFocusHandler,
     toggleFacing,
     toggleTorch,
+    zoomIn: trackControls.zoomIn,
+    zoomOut: trackControls.zoomOut,
+    onTouchStart: trackControls.onTouchStart,
+    onTouchMove: trackControls.onTouchMove,
+    onTouchEnd: (event: TouchEvent) => {
+      if (videoRef.value) trackControls.onTouchEnd(event, videoRef.value)
+    },
+    onClick: (event: MouseEvent) => {
+      if (videoRef.value) trackControls.onClick(event, videoRef.value)
+    },
   }
 }
 

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useCamera } from '@/composables/useCamera'
-import type { CapturedImage, TouchFocusPoint } from '@/types/camera.types'
+import CameraZoomControls from '@/components/common/CameraZoomControls.vue'
+import type { CapturedImage } from '@/types/camera.types'
 
 const emit = defineEmits<{
   'photo-captured': [image: CapturedImage]
@@ -13,16 +14,24 @@ const {
   isReady,
   isTorchOn,
   isTorchSupported,
-  isFocusSupported,
   focusRipple,
+  zoomLevel,
+  zoomMin,
+  zoomMax,
+  isZoomSupported,
   facingMode,
   error,
   startCamera,
   stopCamera,
   capturePhoto,
-  applyTouchFocus,
   toggleFacing,
   toggleTorch,
+  zoomIn,
+  zoomOut,
+  onTouchStart,
+  onTouchMove,
+  onTouchEnd,
+  onClick,
 } = useCamera()
 
 const shutter = ref(false)
@@ -36,21 +45,6 @@ onMounted(async () => {
 onUnmounted(() => {
   stopCamera()
 })
-
-function handleTouchFocus(event: TouchEvent | MouseEvent): void {
-  if (!isFocusSupported.value || !videoEl.value) return
-
-  let point: TouchFocusPoint
-  if (event instanceof TouchEvent) {
-    const touch = event.touches[0]
-    if (!touch) return
-    point = { x: touch.clientX, y: touch.clientY }
-  } else {
-    point = { x: event.clientX, y: event.clientY }
-  }
-
-  applyTouchFocus(point, videoEl.value)
-}
 
 function handleCapture(): void {
   const image = capturePhoto()
@@ -73,8 +67,10 @@ function handleCapture(): void {
 
     <div
       class="camera-capture__viewport"
-      @touchstart.prevent="handleTouchFocus"
-      @click="handleTouchFocus"
+      @touchstart="onTouchStart"
+      @touchmove="onTouchMove"
+      @touchend="onTouchEnd"
+      @click="onClick"
     >
       <video
         ref="videoEl"
@@ -116,17 +112,28 @@ function handleCapture(): void {
         </svg>
       </button>
 
-      <button
-        v-if="isTorchSupported"
-        class="camera-capture__icon-btn"
-        :class="{ 'camera-capture__icon-btn--active': isTorchOn }"
-        aria-label="플래시"
-        @click="toggleTorch"
-      >
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-        </svg>
-      </button>
+      <div class="camera-capture__top-actions">
+        <button
+          v-if="isTorchSupported"
+          class="camera-capture__icon-btn"
+          :class="{ 'camera-capture__icon-btn--active': isTorchOn }"
+          aria-label="플래시"
+          @click="toggleTorch"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+        </button>
+
+        <CameraZoomControls
+          :zoom-level="zoomLevel"
+          :zoom-min="zoomMin"
+          :zoom-max="zoomMax"
+          :is-zoom-supported="isZoomSupported"
+          @zoom-in="zoomIn"
+          @zoom-out="zoomOut"
+        />
+      </div>
     </div>
 
     <!-- 하단 컨트롤 -->
@@ -234,6 +241,12 @@ function handleCapture(): void {
   justify-content: space-between;
   padding: max(env(safe-area-inset-top), 1rem) 1rem 0.75rem;
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent);
+}
+
+.camera-capture__top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .camera-capture__bottom-bar {

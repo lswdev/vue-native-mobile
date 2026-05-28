@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useQrScanner } from '@/composables/useQrScanner'
+import CameraZoomControls from '@/components/common/CameraZoomControls.vue'
 import type { QrScanResult } from '@/types/camera.types'
 
 const emit = defineEmits<{
@@ -13,7 +14,25 @@ const canvasEl = ref<HTMLCanvasElement | null>(null)
 const detectedResult = ref<QrScanResult | null>(null)
 const isPaused = ref(false)
 
-const { isScanning, error, startScan, pauseScan, resumeScan, stopScan } = useQrScanner()
+const {
+  isScanning,
+  focusRipple,
+  zoomLevel,
+  zoomMin,
+  zoomMax,
+  isZoomSupported,
+  error,
+  startScan,
+  pauseScan,
+  resumeScan,
+  stopScan,
+  zoomIn,
+  zoomOut,
+  onTouchStart,
+  onTouchMove,
+  onTouchEnd,
+  onClick,
+} = useQrScanner()
 
 onMounted(async () => {
   if (videoEl.value && canvasEl.value) {
@@ -46,7 +65,13 @@ function handleRescan(): void {
     </div>
 
     <!-- 카메라 뷰 -->
-    <div class="qr-scanner__viewport">
+    <div
+      class="qr-scanner__viewport"
+      @touchstart="onTouchStart"
+      @touchmove="onTouchMove"
+      @touchend="onTouchEnd"
+      @click="onClick"
+    >
       <video
         ref="videoEl"
         class="qr-scanner__video"
@@ -56,6 +81,18 @@ function handleRescan(): void {
       />
       <!-- jsQR 디코딩용 오프스크린 캔버스 -->
       <canvas ref="canvasEl" class="qr-scanner__canvas" />
+
+      <!-- 터치 포커스 리플 -->
+      <Transition name="ripple">
+        <div
+          v-if="focusRipple"
+          class="qr-scanner__focus-ring"
+          :style="{
+            left: `${focusRipple.x}px`,
+            top: `${focusRipple.y}px`,
+          }"
+        />
+      </Transition>
 
       <!-- 스캔 프레임 오버레이 -->
       <div class="qr-scanner__overlay">
@@ -93,7 +130,14 @@ function handleRescan(): void {
         </svg>
       </button>
       <span class="text-white text-sm font-medium">QR 코드 스캔</span>
-      <div class="w-12" />
+      <CameraZoomControls
+        :zoom-level="zoomLevel"
+        :zoom-min="zoomMin"
+        :zoom-max="zoomMax"
+        :is-zoom-supported="isZoomSupported"
+        @zoom-in="zoomIn"
+        @zoom-out="zoomOut"
+      />
     </div>
 
     <!-- 하단 안내 / 결과 -->
@@ -107,7 +151,9 @@ function handleRescan(): void {
           </button>
         </div>
         <p v-else key="hint" class="qr-scanner__hint">
-          QR 코드를 프레임 안에 맞춰주세요
+          QR 코드를 프레임 안에 맞춰주세요<br />
+          <span class="qr-scanner__hint-sub">탭하여 초점 · 두 손가락으로 줌 조절</span><br />
+          <span class="qr-scanner__hint-sub">너무 가까우면 흐릿합니다. 15~20cm 거리 + 줌을 사용하세요</span>
         </p>
       </Transition>
     </div>
@@ -144,6 +190,19 @@ function handleRescan(): void {
   overflow: hidden;
 }
 
+.qr-scanner__focus-ring {
+  position: fixed;
+  width: 60px;
+  height: 60px;
+  margin-left: -30px;
+  margin-top: -30px;
+  border: 2px solid #facc15;
+  border-radius: 4px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  z-index: 5;
+}
+
 .qr-scanner__video {
   width: 100%;
   height: 100%;
@@ -160,6 +219,7 @@ function handleRescan(): void {
   inset: 0;
   display: flex;
   flex-direction: column;
+  pointer-events: none;
 }
 
 .qr-scanner__overlay-top,
@@ -244,6 +304,12 @@ function handleRescan(): void {
 .qr-scanner__hint {
   color: rgba(255, 255, 255, 0.85);
   font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.qr-scanner__hint-sub {
+  font-size: 0.8125rem;
+  color: rgba(255, 255, 255, 0.65);
 }
 
 .qr-scanner__result-card {
@@ -314,5 +380,21 @@ function handleRescan(): void {
 .slide-up-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+.ripple-enter-active {
+  animation: qr-ripple-in 0.2s ease-out;
+}
+.ripple-leave-active {
+  animation: qr-ripple-out 0.4s ease-in forwards;
+}
+
+@keyframes qr-ripple-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes qr-ripple-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(1.4); }
 }
 </style>
