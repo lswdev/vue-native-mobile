@@ -1,49 +1,75 @@
 import { ref, readonly, onUnmounted } from 'vue'
 import type { CapturedImage, CameraFacingMode, TouchFocusPoint } from '@/types/camera.types'
 import { useCameraTrack } from '@/composables/useCameraTrack'
-import { requestUserMedia } from '@/utils/media.util'
-import { applyContinuousAutofocus, detectTrackCapabilities } from '@/utils/cameraFocus.util'
+import { requestCameraStream } from '@/utils/cameraDevice.util'
+import { applyContinuousAutofocus } from '@/utils/cameraFocus.util'
 
 const CAPTURE_MIME = 'image/jpeg'
 const CAPTURE_QUALITY = 0.92
+const DEFAULT_CAMERA_ZOOM = 1
 
 export function useCamera() {
   const videoRef = ref<HTMLVideoElement | null>(null)
   const stream = ref<MediaStream | null>(null)
-  const facingMode = ref<CameraFacingMode>('environment')
   const isReady = ref(false)
-  const isTorchOn = ref(false)
-  const isTorchSupported = ref(false)
   const error = ref<string | null>(null)
 
   const trackControls = useCameraTrack()
 
-  async function startCamera(el: HTMLVideoElement, facing: CameraFacingMode = 'environment'): Promise<void> {
-    error.value = null
-    facingMode.value = facing
+  async function openStream(el: HTMLVideoElement, facing: CameraFacingMode, isInitial = false): Promise<void> {
+    const mediaStream = await requestCameraStream(facing)
 
-    const constraints: MediaStreamConstraints = {
-      video: {
-        facingMode: { ideal: facing },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-        focusMode: { ideal: 'continuous' },
-      } as MediaTrackConstraints,
-      audio: false,
+    stream.value = mediaStream
+    videoRef.value = el
+    el.srcObject = mediaStream
+    await el.play()
+    isReady.value = true
+
+    await applyContinuousAutofocus(mediaStream)
+    await trackControls.bindStream(mediaStream, {
+      facingMode: facing,
+      defaultZoom: isInitial ? DEFAULT_CAMERA_ZOOM : undefined,
+      onFacingChange: async (newFacing) => {
+        await restartCamera(el, newFacing)
+      },
+    })
+  }
+
+  async function restartCamera(el: HTMLVideoElement, facing: CameraFacingMode): Promise<void> {
+    const savedZoom = trackControls.zoomLevel.value
+    const savedBrightness = trackControls.brightness.value
+    const savedTorch = trackControls.isTorchOn.value
+
+    if (stream.value) {
+      stream.value.getTracks().forEach((track) => track.stop())
+      stream.value = null
     }
 
-    try {
-      const mediaStream = await requestUserMedia(constraints)
-      stream.value = mediaStream
-      videoRef.value = el
-      el.srcObject = mediaStream
-      await el.play()
-      isReady.value = true
+    isReady.value = false
+    trackControls.unbindStream()
 
-      const capabilities = detectTrackCapabilities(mediaStream)
-      isTorchSupported.value = capabilities.isTorchSupported
-      await applyContinuousAutofocus(mediaStream)
-      trackControls.bindStream(mediaStream)
+    try {
+      await openStream(el, facing, false)
+
+      if (trackControls.isZoomSupported.value) {
+        await trackControls.setZoom(savedZoom)
+      }
+      if (trackControls.isBrightnessSupported.value) {
+        await trackControls.setBrightness(savedBrightness)
+      }
+      if (savedTorch && facing === 'environment') {
+        await trackControls.setTorch(true)
+      }
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '카메라 전환에 실패했습니다.'
+    }
+  }
+
+  async function startCamera(el: HTMLVideoElement, facing: CameraFacingMode = 'environment'): Promise<void> {
+    error.value = null
+
+    try {
+      await openStream(el, facing, true)
     } catch (err) {
       error.value = err instanceof Error ? err.message : '카메라 접근에 실패했습니다.'
       isReady.value = false
@@ -79,31 +105,6 @@ export function useCamera() {
     }
   }
 
-  async function toggleFacing(): Promise<void> {
-    const newFacing: CameraFacingMode = facingMode.value === 'environment' ? 'user' : 'environment'
-    stopCamera()
-    if (videoRef.value) {
-      await startCamera(videoRef.value, newFacing)
-    }
-  }
-
-  async function toggleTorch(): Promise<void> {
-    if (!stream.value || !isTorchSupported.value) return
-
-    const track = stream.value.getVideoTracks()[0]
-    if (!track) return
-
-    const newState = !isTorchOn.value
-    try {
-      await track.applyConstraints({
-        advanced: [{ torch: newState } as MediaTrackConstraintSet],
-      })
-      isTorchOn.value = newState
-    } catch {
-      // 토치 제어 실패 시 무시
-    }
-  }
-
   function stopCamera(): void {
     if (stream.value) {
       stream.value.getTracks().forEach((track) => track.stop())
@@ -113,7 +114,6 @@ export function useCamera() {
       videoRef.value.srcObject = null
     }
     isReady.value = false
-    isTorchOn.value = false
     trackControls.unbindStream()
   }
 
@@ -124,21 +124,28 @@ export function useCamera() {
   return {
     videoRef,
     isReady: readonly(isReady),
-    isTorchOn: readonly(isTorchOn),
-    isTorchSupported: readonly(isTorchSupported),
+    isTorchOn: trackControls.isTorchOn,
+    isTorchSupported: trackControls.isTorchSupported,
+    isTorchAvailable: trackControls.isTorchAvailable,
+    brightness: trackControls.brightness,
+    brightnessMin: trackControls.brightnessMin,
+    brightnessMax: trackControls.brightnessMax,
+    isBrightnessSupported: trackControls.isBrightnessSupported,
     focusRipple: trackControls.focusRipple,
     zoomLevel: trackControls.zoomLevel,
     zoomMin: trackControls.zoomMin,
     zoomMax: trackControls.zoomMax,
     isZoomSupported: trackControls.isZoomSupported,
-    facingMode: readonly(facingMode),
+    facingMode: trackControls.facingMode,
     error: readonly(error),
     startCamera,
     stopCamera,
     capturePhoto,
     applyTouchFocus: applyTouchFocusHandler,
-    toggleFacing,
-    toggleTorch,
+    toggleFacing: trackControls.toggleFacing,
+    toggleTorch: trackControls.toggleTorch,
+    setBrightness: trackControls.setBrightness,
+    setZoom: trackControls.setZoom,
     zoomIn: trackControls.zoomIn,
     zoomOut: trackControls.zoomOut,
     onTouchStart: trackControls.onTouchStart,

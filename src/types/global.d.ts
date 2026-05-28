@@ -12,6 +12,7 @@ interface MediaTrackCapabilities {
   focusMode?: string[]
   pointsOfInterest?: unknown
   torch?: boolean
+  exposureCompensation?: { min: number; max: number; step?: number }
 }
 
 interface ConstrainPoint2DParameters {
@@ -23,4 +24,6 @@ interface MediaTrackConstraintSet {
   focusMode?: string | string[]
   pointsOfInterest?: ConstrainPoint2DParameters[]
   torch?: boolean
+  exposureCompensation?: number
+  zoom?: number
 }

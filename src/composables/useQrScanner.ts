@@ -1,8 +1,8 @@
 import { ref, readonly, onUnmounted } from 'vue'
 import jsQR from 'jsqr'
-import type { QrScanResult } from '@/types/camera.types'
+import type { CameraFacingMode, QrScanResult } from '@/types/camera.types'
 import { useCameraTrack } from '@/composables/useCameraTrack'
-import { requestUserMedia } from '@/utils/media.util'
+import { requestCameraStream } from '@/utils/cameraDevice.util'
 import { applyContinuousAutofocus, getScanCropRegion } from '@/utils/cameraFocus.util'
 
 const SCAN_INTERVAL_MS = 120
@@ -21,34 +21,85 @@ export function useQrScanner() {
 
   let rafId: number | null = null
   let lastScanTime = 0
+  let onDetectedCallback: ((result: QrScanResult) => void) | null = null
+
+  async function openStream(
+    videoEl: HTMLVideoElement,
+    facing: CameraFacingMode,
+    isInitial = false,
+  ): Promise<void> {
+    const mediaStream = await requestCameraStream(facing)
+
+    stream.value = mediaStream
+    videoEl.srcObject = mediaStream
+    await videoEl.play()
+
+    await applyContinuousAutofocus(mediaStream)
+    await trackControls.bindStream(mediaStream, {
+      facingMode: facing,
+      defaultZoom: isInitial ? DEFAULT_QR_ZOOM : undefined,
+      onFacingChange: async (newFacing) => {
+        if (videoRef.value && canvasRef.value && onDetectedCallback) {
+          await restartScan(videoRef.value, canvasRef.value, onDetectedCallback, newFacing)
+        }
+      },
+    })
+  }
+
+  async function restartScan(
+    videoEl: HTMLVideoElement,
+    canvasEl: HTMLCanvasElement,
+    onDetected: (result: QrScanResult) => void,
+    facing: CameraFacingMode,
+  ): Promise<void> {
+    const wasScanning = isScanning.value
+    pauseScan()
+
+    const savedZoom = trackControls.zoomLevel.value
+    const savedBrightness = trackControls.brightness.value
+    const savedTorch = trackControls.isTorchOn.value
+
+    if (stream.value) {
+      stream.value.getTracks().forEach((track) => track.stop())
+      stream.value = null
+    }
+    trackControls.unbindStream()
+
+    try {
+      await openStream(videoEl, facing)
+
+      if (trackControls.isZoomSupported.value) {
+        await trackControls.setZoom(savedZoom)
+      }
+      if (trackControls.isBrightnessSupported.value) {
+        await trackControls.setBrightness(savedBrightness)
+      }
+      if (savedTorch && facing === 'environment') {
+        await trackControls.setTorch(true)
+      }
+
+      if (wasScanning) {
+        isScanning.value = true
+        scanLoop(videoEl, canvasEl, onDetected)
+      }
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '카메라 전환에 실패했습니다.'
+    }
+  }
 
   async function startScan(
     videoEl: HTMLVideoElement,
     canvasEl: HTMLCanvasElement,
     onDetected: (result: QrScanResult) => void,
+    facing: CameraFacingMode = 'environment',
   ): Promise<void> {
     error.value = null
     videoRef.value = videoEl
     canvasRef.value = canvasEl
+    onDetectedCallback = onDetected
 
     try {
-      const mediaStream = await requestUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          focusMode: { ideal: 'continuous' },
-        } as MediaTrackConstraints,
-        audio: false,
-      })
-
-      stream.value = mediaStream
-      videoEl.srcObject = mediaStream
-      await videoEl.play()
-
-      await applyContinuousAutofocus(mediaStream)
-      trackControls.bindStream(mediaStream, { defaultZoom: DEFAULT_QR_ZOOM })
-
+      await openStream(videoEl, facing, true)
       isScanning.value = true
       scanLoop(videoEl, canvasEl, onDetected)
     } catch (err) {
@@ -138,6 +189,7 @@ export function useQrScanner() {
 
   function resumeScan(onDetected: (result: QrScanResult) => void): void {
     if (!videoRef.value || !canvasRef.value || !stream.value) return
+    onDetectedCallback = onDetected
     lastResult.value = null
     isScanning.value = true
     scanLoop(videoRef.value, canvasRef.value, onDetected)
@@ -145,6 +197,7 @@ export function useQrScanner() {
 
   function stopScan(): void {
     pauseScan()
+    onDetectedCallback = null
     if (stream.value) {
       stream.value.getTracks().forEach((track) => track.stop())
       stream.value = null
@@ -164,6 +217,14 @@ export function useQrScanner() {
     isScanning: readonly(isScanning),
     lastResult: readonly(lastResult),
     error: readonly(error),
+    isTorchOn: trackControls.isTorchOn,
+    isTorchSupported: trackControls.isTorchSupported,
+    isTorchAvailable: trackControls.isTorchAvailable,
+    brightness: trackControls.brightness,
+    brightnessMin: trackControls.brightnessMin,
+    brightnessMax: trackControls.brightnessMax,
+    isBrightnessSupported: trackControls.isBrightnessSupported,
+    facingMode: trackControls.facingMode,
     focusRipple: trackControls.focusRipple,
     zoomLevel: trackControls.zoomLevel,
     zoomMin: trackControls.zoomMin,
@@ -173,6 +234,10 @@ export function useQrScanner() {
     pauseScan,
     resumeScan,
     stopScan,
+    toggleFacing: trackControls.toggleFacing,
+    toggleTorch: trackControls.toggleTorch,
+    setBrightness: trackControls.setBrightness,
+    setZoom: trackControls.setZoom,
     zoomIn: trackControls.zoomIn,
     zoomOut: trackControls.zoomOut,
     onTouchStart: trackControls.onTouchStart,

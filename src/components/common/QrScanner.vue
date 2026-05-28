@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useQrScanner } from '@/composables/useQrScanner'
-import CameraZoomControls from '@/components/common/CameraZoomControls.vue'
+import CameraFlashButton from '@/components/common/CameraFlashButton.vue'
+import CameraZoomPresets from '@/components/common/CameraZoomPresets.vue'
+import CameraDeviceControls from '@/components/common/CameraDeviceControls.vue'
+import cameraExchangeIcon from '@/assets/icons/camera_exchange.svg'
 import type { QrScanResult } from '@/types/camera.types'
 
 const emit = defineEmits<{
@@ -16,18 +19,26 @@ const isPaused = ref(false)
 
 const {
   isScanning,
+  isTorchOn,
+  isTorchAvailable,
+  brightness,
+  brightnessMin,
+  brightnessMax,
+  isBrightnessSupported,
+  facingMode,
   focusRipple,
   zoomLevel,
   zoomMin,
   zoomMax,
-  isZoomSupported,
   error,
   startScan,
   pauseScan,
   resumeScan,
   stopScan,
-  zoomIn,
-  zoomOut,
+  toggleFacing,
+  toggleTorch,
+  setBrightness,
+  setZoom,
   onTouchStart,
   onTouchMove,
   onTouchEnd,
@@ -75,6 +86,7 @@ function handleRescan(): void {
       <video
         ref="videoEl"
         class="qr-scanner__video"
+        :class="{ 'qr-scanner__video--mirrored': facingMode === 'user' }"
         autoplay
         playsinline
         muted
@@ -118,6 +130,14 @@ function handleRescan(): void {
       </div>
     </div>
 
+    <CameraDeviceControls
+      :is-brightness-supported="isBrightnessSupported"
+      :brightness="brightness"
+      :brightness-min="brightnessMin"
+      :brightness-max="brightnessMax"
+      @update:brightness="setBrightness"
+    />
+
     <!-- 상단 바 -->
     <div class="qr-scanner__top-bar">
       <button
@@ -130,18 +150,31 @@ function handleRescan(): void {
         </svg>
       </button>
       <span class="text-white text-sm font-medium">QR 코드 스캔</span>
-      <CameraZoomControls
-        :zoom-level="zoomLevel"
-        :zoom-min="zoomMin"
-        :zoom-max="zoomMax"
-        :is-zoom-supported="isZoomSupported"
-        @zoom-in="zoomIn"
-        @zoom-out="zoomOut"
+      <CameraFlashButton
+        :is-torch-on="isTorchOn"
+        :is-torch-available="isTorchAvailable"
+        @toggle-torch="toggleTorch"
       />
     </div>
 
     <!-- 하단 안내 / 결과 -->
     <div class="qr-scanner__bottom-bar">
+      <div class="qr-scanner__bottom-controls">
+        <CameraZoomPresets
+          :zoom-level="zoomLevel"
+          :zoom-min="zoomMin"
+          :zoom-max="zoomMax"
+          @select-preset="setZoom"
+        />
+
+        <button
+          class="qr-scanner__icon-btn qr-scanner__icon-btn--dark"
+          aria-label="전후면 카메라 전환"
+          @click="toggleFacing"
+        >
+          <img :src="cameraExchangeIcon" width="24" height="24" alt="" />
+        </button>
+      </div>
       <Transition name="slide-up" mode="out-in">
         <div v-if="detectedResult" key="result" class="qr-scanner__result-card">
           <p class="qr-scanner__result-label">스캔 결과</p>
@@ -207,6 +240,10 @@ function handleRescan(): void {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.qr-scanner__video--mirrored {
+  transform: scaleX(-1);
 }
 
 .qr-scanner__canvas {
@@ -296,9 +333,21 @@ function handleRescan(): void {
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 1.5rem 1.5rem max(env(safe-area-inset-bottom), 1.5rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.5rem max(env(safe-area-inset-bottom), 1.5rem);
   background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent);
   text-align: center;
+}
+
+.qr-scanner__bottom-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  width: 100%;
 }
 
 .qr-scanner__hint {
@@ -366,6 +415,14 @@ function handleRescan(): void {
   background: transparent;
   border: none;
   cursor: pointer;
+}
+
+.qr-scanner__icon-btn:active {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.qr-scanner__icon-btn--dark {
+  background: rgba(0, 0, 0, 0.35);
 }
 
 /* 슬라이드업 트랜지션 */

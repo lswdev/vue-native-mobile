@@ -6,15 +6,20 @@ interface ExtendedMediaTrackCapabilities extends MediaTrackCapabilities {
   torch?: boolean
   zoom?: { min: number; max: number; step?: number }
   focusDistance?: { min: number; max: number; step?: number }
+  exposureCompensation?: { min: number; max: number; step?: number }
 }
 
 export interface TrackCapabilities {
   isFocusSupported: boolean
   isTorchSupported: boolean
   isZoomSupported: boolean
+  isBrightnessSupported: boolean
   zoomMin: number
   zoomMax: number
   zoomStep: number
+  brightnessMin: number
+  brightnessMax: number
+  brightnessStep: number
 }
 
 export interface ScanCropRegion {
@@ -39,22 +44,31 @@ export function detectTrackCapabilities(stream: MediaStream): TrackCapabilities 
       isFocusSupported: false,
       isTorchSupported: false,
       isZoomSupported: false,
+      isBrightnessSupported: false,
       zoomMin: 1,
       zoomMax: 1,
       zoomStep: 0.1,
+      brightnessMin: 0,
+      brightnessMax: 0,
+      brightnessStep: 0.1,
     }
   }
 
   const capabilities = getCapabilities(track)
   const zoom = capabilities.zoom
+  const exposure = capabilities.exposureCompensation
 
   return {
     isFocusSupported: 'focusMode' in capabilities || 'pointsOfInterest' in capabilities,
-    isTorchSupported: 'torch' in capabilities,
+    isTorchSupported: capabilities.torch === true,
     isZoomSupported: !!zoom && zoom.max > zoom.min,
+    isBrightnessSupported: !!exposure && exposure.max > exposure.min,
     zoomMin: zoom?.min ?? 1,
     zoomMax: zoom?.max ?? 1,
     zoomStep: zoom?.step ?? 0.1,
+    brightnessMin: exposure?.min ?? 0,
+    brightnessMax: exposure?.max ?? 0,
+    brightnessStep: exposure?.step ?? 0.1,
   }
 }
 
@@ -146,6 +160,74 @@ export async function applyTouchFocus(
   }
 }
 
+export function getCurrentBrightness(stream: MediaStream): number {
+  const track = getTrack(stream)
+  if (!track) return 0
+
+  const settings = track.getSettings?.() as { exposureCompensation?: number } | undefined
+  return settings?.exposureCompensation ?? 0
+}
+
+export async function applyTorch(stream: MediaStream, enabled: boolean): Promise<boolean> {
+  const track = getTrack(stream)
+  if (!track) return false
+
+  const capabilities = getCapabilities(track)
+  if (capabilities.torch !== true) return false
+
+  const attempts: MediaTrackConstraints[] = [
+    { torch: enabled } as MediaTrackConstraints,
+    { advanced: [{ torch: enabled } as MediaTrackConstraintSet] },
+    {
+      advanced: [{ torch: enabled, zoom: getCurrentZoom(stream) } as MediaTrackConstraintSet],
+    },
+  ]
+
+  for (const constraints of attempts) {
+    try {
+      await track.applyConstraints(constraints)
+
+      await delay(80)
+
+      const settings = track.getSettings?.() as { torch?: boolean } | undefined
+      if (settings?.torch === enabled) return true
+    } catch {
+      continue
+    }
+  }
+
+  // 일부 삼성 기기는 getSettings() 반영이 늦지만 실제 플래시는 켜짐
+  try {
+    await track.applyConstraints({ torch: enabled } as MediaTrackConstraints)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function applyBrightness(stream: MediaStream, value: number): Promise<number> {
+  const track = getTrack(stream)
+  if (!track) return 0
+
+  const { brightnessMin, brightnessMax, brightnessStep, isBrightnessSupported } =
+    detectTrackCapabilities(stream)
+  if (!isBrightnessSupported) return getCurrentBrightness(stream)
+
+  const stepped = Math.round(value / brightnessStep) * brightnessStep
+  const clamped = Math.min(brightnessMax, Math.max(brightnessMin, stepped))
+
+  const applied =
+    (await tryApplyConstraints(track, {
+      exposureCompensation: clamped,
+    } as MediaTrackConstraints)) ||
+    (await tryApplyConstraints(track, {
+      advanced: [{ exposureCompensation: clamped } as MediaTrackConstraintSet],
+    }))
+
+  if (!applied) return getCurrentBrightness(stream)
+  return getCurrentBrightness(stream)
+}
+
 export async function applyZoom(stream: MediaStream, zoom: number): Promise<number> {
   const track = getTrack(stream)
   if (!track) return 1
@@ -153,16 +235,24 @@ export async function applyZoom(stream: MediaStream, zoom: number): Promise<numb
   const { zoomMin, zoomMax, zoomStep } = detectTrackCapabilities(stream)
   if (zoomMax <= zoomMin) return getCurrentZoom(stream)
 
-  const stepped = Math.round(zoom / zoomStep) * zoomStep
-  const clamped = Math.min(zoomMax, Math.max(zoomMin, stepped))
+  const clamped = Math.min(zoomMax, Math.max(zoomMin, zoom))
+  const stepped = Math.round(clamped / zoomStep) * zoomStep
+  const candidates = Array.from(new Set([clamped, stepped]))
 
-  const applied =
-    (await tryApplyConstraints(track, { zoom: clamped } as MediaTrackConstraints)) ||
-    (await tryApplyConstraints(track, {
-      advanced: [{ zoom: clamped } as MediaTrackConstraintSet],
-    }))
+  for (const value of candidates) {
+    const applied =
+      (await tryApplyConstraints(track, { zoom: value } as MediaTrackConstraints)) ||
+      (await tryApplyConstraints(track, {
+        advanced: [{ zoom: value } as MediaTrackConstraintSet],
+      }))
 
-  if (!applied) return getCurrentZoom(stream)
+    if (!applied) continue
+
+    const current = getCurrentZoom(stream)
+    if (Math.abs(current - value) <= Math.max(zoomStep, 0.25)) {
+      return current
+    }
+  }
 
   return getCurrentZoom(stream)
 }

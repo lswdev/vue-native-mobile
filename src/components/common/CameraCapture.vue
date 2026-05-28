@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useCamera } from '@/composables/useCamera'
-import CameraZoomControls from '@/components/common/CameraZoomControls.vue'
+import CameraFlashButton from '@/components/common/CameraFlashButton.vue'
+import CameraZoomPresets from '@/components/common/CameraZoomPresets.vue'
+import CameraDeviceControls from '@/components/common/CameraDeviceControls.vue'
+import cameraExchangeIcon from '@/assets/icons/camera_exchange.svg'
 import type { CapturedImage } from '@/types/camera.types'
 
 const emit = defineEmits<{
@@ -13,12 +16,15 @@ const videoEl = ref<HTMLVideoElement | null>(null)
 const {
   isReady,
   isTorchOn,
-  isTorchSupported,
+  isTorchAvailable,
+  brightness,
+  brightnessMin,
+  brightnessMax,
+  isBrightnessSupported,
   focusRipple,
   zoomLevel,
   zoomMin,
   zoomMax,
-  isZoomSupported,
   facingMode,
   error,
   startCamera,
@@ -26,8 +32,8 @@ const {
   capturePhoto,
   toggleFacing,
   toggleTorch,
-  zoomIn,
-  zoomOut,
+  setBrightness,
+  setZoom,
   onTouchStart,
   onTouchMove,
   onTouchEnd,
@@ -100,6 +106,14 @@ function handleCapture(): void {
       />
     </div>
 
+    <CameraDeviceControls
+      :is-brightness-supported="isBrightnessSupported"
+      :brightness="brightness"
+      :brightness-min="brightnessMin"
+      :brightness-max="brightnessMax"
+      @update:brightness="setBrightness"
+    />
+
     <!-- 상단 컨트롤 -->
     <div class="camera-capture__top-bar">
       <button
@@ -112,36 +126,26 @@ function handleCapture(): void {
         </svg>
       </button>
 
-      <div class="camera-capture__top-actions">
-        <button
-          v-if="isTorchSupported"
-          class="camera-capture__icon-btn"
-          :class="{ 'camera-capture__icon-btn--active': isTorchOn }"
-          aria-label="플래시"
-          @click="toggleTorch"
-        >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-          </svg>
-        </button>
-
-        <CameraZoomControls
-          :zoom-level="zoomLevel"
-          :zoom-min="zoomMin"
-          :zoom-max="zoomMax"
-          :is-zoom-supported="isZoomSupported"
-          @zoom-in="zoomIn"
-          @zoom-out="zoomOut"
-        />
-      </div>
+      <CameraFlashButton
+        :is-torch-on="isTorchOn"
+        :is-torch-available="isTorchAvailable"
+        @toggle-torch="toggleTorch"
+      />
     </div>
 
     <!-- 하단 컨트롤 -->
     <div class="camera-capture__bottom-bar">
+      <CameraZoomPresets
+        class="camera-capture__zoom-presets"
+        :zoom-level="zoomLevel"
+        :zoom-min="zoomMin"
+        :zoom-max="zoomMax"
+        @select-preset="setZoom"
+      />
+
       <div class="camera-capture__bottom-bar-inner">
         <div class="w-14" />
 
-        <!-- 촬영 버튼 -->
         <button
           class="camera-capture__shutter-btn"
           :disabled="!isReady"
@@ -151,18 +155,12 @@ function handleCapture(): void {
           <span class="camera-capture__shutter-btn-inner" />
         </button>
 
-        <!-- 전/후면 전환 -->
         <button
           class="camera-capture__icon-btn camera-capture__icon-btn--dark"
-          aria-label="카메라 전환"
+          aria-label="전후면 카메라 전환"
           @click="toggleFacing"
         >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 7h-9"/>
-            <path d="M14 17H5"/>
-            <circle cx="17" cy="17" r="3"/>
-            <circle cx="7" cy="7" r="3"/>
-          </svg>
+          <img :src="cameraExchangeIcon" width="24" height="24" alt="" />
         </button>
       </div>
     </div>
@@ -243,25 +241,28 @@ function handleCapture(): void {
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent);
 }
 
-.camera-capture__top-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .camera-capture__bottom-bar {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
   padding-bottom: max(env(safe-area-inset-bottom), 1.5rem);
   background: linear-gradient(to top, rgba(0, 0, 0, 0.6), transparent);
+}
+
+.camera-capture__zoom-presets {
+  margin-bottom: 0.25rem;
 }
 
 .camera-capture__bottom-bar-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
   padding: 0 2rem;
 }
 
